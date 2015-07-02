@@ -1,5 +1,12 @@
 #!/usr/bin/env perl
 
+# TODO (2015/08/12) Instead of dying on errors with the filesystem after
+# running rsync(1), push them to their own array of errors and output them to
+# STDOUT and via e-mail if that array isn't empty
+
+# TODO (2015/08/12) Also consider adding the output of lsof(8) if unmounting
+# the drive in that same area fails
+
 # Force me to write this properly
 
 use strict;
@@ -17,7 +24,7 @@ use Fcntl ':flock';                             # Built-in
 
 INIT {
     if ( !flock main::DATA, LOCK_EX | LOCK_NB ) {
-        my $email;
+        my @emails;
         my $cur_time = strftime '%c', localtime;
 
         # Try to read in parameters from the config file
@@ -26,15 +33,15 @@ INIT {
         if ( -f "$config" ) {
             my $cfg = Config::Simple->new();
             $cfg->read("$config") or croak $ERRNO;
-            $email = $cfg->param('email');
+            @emails = $cfg->param('emails');
 
             # Override parameters if entered on the command line
-            GetOptions( 'email|e:s' => \$email, )
+            GetOptions( 'emails|e:s{,}' => \@emails, )
                 or carp "No e-mail defined -- user cannot be notified\n";
             print "$PROGRAM_NAME is already running\n" or croak $ERRNO;
-            if ( !$email ) {
+            if (@emails) {
                 system
-                    "echo \"$PROGRAM_NAME is already running\" | mail -s \"Error report from $PROGRAM_NAME at $cur_time\" $email"
+                    "echo \"$PROGRAM_NAME is already running\" | /usr/bin/mail -s \"UVB: Error report from $PROGRAM_NAME at $cur_time\" @emails"
                     and croak $ERRNO;
             }
             exit 1;
@@ -56,7 +63,7 @@ my @allowed_uuids;
 my $base_device;
 my $base_dir = $ENV{'HOME'} . '/.local/share/SS/ssbak2bak';
 my $config   = "$base_dir/config.ini";
-my $email;
+my @emails;
 my $real_device;
 my $real_device_base;
 my $source_dir;
@@ -70,20 +77,20 @@ if ( !-d $base_dir ) { system "mkdir -p $base_dir" and croak $ERRNO; }
 if ( -f "$config" ) {
     my $cfg = Config::Simple->new();
     $cfg->read("$config") or croak $ERRNO;
-    $email         = $cfg->param('email');
+    @emails        = $cfg->param('emails');
     $source_dir    = $cfg->param('source');
     @allowed_uuids = $cfg->param('allowed_uuids');
 }
 
 # Override parameters if entered on the command line
 GetOptions(
-    'help|h'       => \my $help,
-    'debug'        => \my $debug,            # dummy variable
-    'man'          => \my $man,
-    'version|v'    => \my $version,
-    'email|e:s'    => \$email,
-    'source|s:s'   => \$source_dir,
-    'uuids|u:s{,}' => \my @allowed_uuids2,
+    'help|h'        => \my $help,
+    'debug'         => \my $debug,            # dummy variable
+    'man'           => \my $man,
+    'version|v'     => \my $version,
+    'emails|e:s{,}' => \@emails,
+    'source|s:s'    => \$source_dir,
+    'uuids|u:s{,}'  => \my @allowed_uuids2,
 
 ) or pod2usage( -verbose => 0 );
 
@@ -107,8 +114,10 @@ if ( $EFFECTIVE_USER_ID != 0 ) {
 }
 
 # Verify that e-mail and source dirs make reasonable sense
-if ( $email !~ m/^\w+[@][\d[:alpha:]\-]{1,}[.]{1,}[\d[:alpha:]-]{2,6}$/xms ) {
-    croak "Invalid e-mail address syntax\n";
+foreach (@emails) {
+    if ( $_ !~ m/^\w+[@][\d[:alpha:]\-]{1,}[.]{1,}[\d[:alpha:]-]{2,6}$/xms ) {
+        croak "Invalid e-mail address syntax in $_\n";
+    }
 }
 if ( !-d $source_dir ) {
     croak "Source directory $source_dir doesn't exist\n";
@@ -216,7 +225,7 @@ sub verify {
 }
 
 sub is_permitted {
-    my $UUID = `blkid /dev/$symlink`;
+    my $UUID = `/sbin/blkid /dev/$symlink`;
     ($UUID) = $UUID =~ /UUID="(.+?)"/xms;
     ### $UUID
     if ( "@allowed_uuids" =~ /$UUID/ixms ) {
@@ -269,19 +278,19 @@ sub backup {
     system
 
         # Mind the trailing / at the end of $source_dir
-        "rsync --archive --hard-links --acls --xattrs --verbose \"$source_dir/\" \"$backup_to_full\" 2>&1";
+        "/usr/bin/rsync --archive --hard-links --acls --xattrs --verbose \"$source_dir/\" \"$backup_to_full\" 2>&1";
     my $rsync_status_return = $CHILD_ERROR >> 8;
     my $rsync_status_error  = $ERRNO;
     my $rsync_output;
 
     if ( $rsync_status_return != 0 && $rsync_status_error != 0 ) {
         $rsync_output
-            = "Rsync reported issues.\nrsync error code: $rsync_status_return;\nrsync error message: $rsync_status_error\n";
+            = "Backup from $source_dir to $backup_to_full experienced problems.\nrsync error code: $rsync_status_return;\nrsync error message: $rsync_status_error\nPlease contact SmartSystems for further assistance.\n";
         ### $rsync_output
     }
     else {
         $rsync_output
-            = "Backup from $source_dir to $backup_to_full completed successfully.\n";
+            = "Backup from $source_dir to $backup_to_full completed successfully.\nIt is now safe to remove the drive.\n";
         ### $rsync_output
     }
 
@@ -290,7 +299,7 @@ sub backup {
     system "rm /dev/$symlink"  and croak $ERRNO;
     my $cur_time = strftime '%c', localtime;
     system
-        "echo \"Backup complete. Rsync output: $rsync_output\" | mail -s \"Backup report from $source_dir at $cur_time\" $email"
+        "echo \"$rsync_output\" | /usr/bin/mail -s \"UVB: Backup report from $source_dir at $cur_time\" @emails"
         and croak $ERRNO;
     return 0;
 }
@@ -326,7 +335,7 @@ ssbak2bak -- Backs up from a local machine to USB based on a udev rule
         --debug         Enables debug mode
         --man           Displays the full embedded manual
         --version       Displays the version and then exits
-    -e, --email         E-mail address to send reports to
+    -e, --emails        E-mail addresses to send reports to
     -s, --source        Directory to back up
     -u, --uuids         List of UUIDs of partitions to back up to
 
@@ -370,7 +379,7 @@ Sample /etc/udev/rules.d/backup.rules:
 
     # Backup rules
     SUBSYSTEM=="block", ACTION=="add", KERNEL=="xvd*", SYMLINK+="safety%k"
-    SUBSYSTEM=="block", ACTION=="add", KERNEL=="xvd[ef]1", RUN+="/home/admin/.local/share/SS/ssbak2bak/ssbak2bak.pl | at now"
+    SUBSYSTEM=="block", ACTION=="add", KERNEL=="xvd[ef]1", RUN+="bash -c 'export HOME=/home/foo && /home/foo/.local/bin/ssbak2bak/ssbak2bak.pl | at now'"
 
 What this does is check for any drive that is successfully added, then creates
 a symlink to it and every partition on it for safety's sake. It then runs the
@@ -398,7 +407,7 @@ For reference, here's a sample .msmtprc:
 For convenience, all of the required parameters can be put into a simple INI
 config file in '$HOME/.local/share/SS/ssbak2bak', e.g.:
 
-    email=foo@mycompany.com
+    emails=foo@mycompany.com, bar@mycompany.com
     source=/mnt/bds/2688a528d293-48b9-7634-7b9d-96c72c74
     allowed_uuids=F82163C4F363C4E9, 2AAA4AD36D020A26
 
@@ -407,7 +416,7 @@ config file in '$HOME/.local/share/SS/ssbak2bak', e.g.:
 Perl:
 
     -Perl of a recent vintage (developed on 5.18.2)
-    -Config::Simple; (cpan Config::Simple or dpkg libconfig-simple-perl)
+    -Config::Simple (cpan Config::Simple or dpkg libconfig-simple-perl)
     -Smart::Comments (cpanm Smart::Comments or dpkg libsmart-comments-perl)
         -The call for this can be commented out at the top of the script if
          this functionality is unneeded
@@ -420,7 +429,7 @@ External:
     -mail (heirloom-mailx)
     -msmtp (msmtp)
     -udev (udev)
-    -udev rule
+    -udev rules
 
 =head1 INCOMPATIBILITIES
 
