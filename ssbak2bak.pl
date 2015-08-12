@@ -1,12 +1,5 @@
 #!/usr/bin/env perl
 
-# TODO (2015/08/12) Instead of dying on errors with the filesystem after
-# running rsync(1), push them to their own array of errors and output them to
-# STDOUT and via e-mail if that array isn't empty
-
-# TODO (2015/08/12) Also consider adding the output of lsof(8) if unmounting
-# the drive in that same area fails
-
 # Force me to write this properly
 
 use strict;
@@ -17,15 +10,30 @@ use warnings;
 use Carp;              # Built-in
 use Config::Simple;    # dpkg libconfig-simple-perl || cpan Config::Simple
 use English qw(-no_match_vars);                 # Built-in
-use Getopt::Long qw(:config no_ignore_case);    # Built-in
-use Pod::Usage;                                 # Built-in
-use POSIX qw(strftime);                         # Built-in
 use Fcntl ':flock';                             # Built-in
+use Getopt::Long qw(:config no_ignore_case);    # Built-in
+use POSIX qw(strftime);                         # Built-in
+use Pod::Usage;                                 # Built-in
+use feature 'say';
+use sigtrap qw/handler cleanup normal-signals/;
+
+our $VERSION = '0.2';
 
 INIT {
     if ( !flock main::DATA, LOCK_EX | LOCK_NB ) {
         my @emails;
         my $cur_time = strftime '%c', localtime;
+        my $mail = `which mail`;
+        if ( $mail eq q{} ) {
+            say
+                "heirloom-mailx is not installed and $PROGRAM_NAME is already running"
+                or croak $ERRNO;
+            exit 1;
+        }
+        else {
+            chomp $mail;
+            $mail = $mail . ' -s';
+        }
 
         # Try to read in parameters from the config file
         my $base_dir = $ENV{'HOME'} . '/.local/share/SS/ssbak2bak';
@@ -38,10 +46,10 @@ INIT {
             # Override parameters if entered on the command line
             GetOptions( 'emails|e:s{,}' => \@emails, )
                 or carp "No e-mail defined -- user cannot be notified\n";
-            print "$PROGRAM_NAME is already running\n" or croak $ERRNO;
+            say "$PROGRAM_NAME is already running" or croak $ERRNO;
             if (@emails) {
                 system
-                    "echo \"$PROGRAM_NAME is already running\" | /usr/bin/mail -s \"UVB: Error report from $PROGRAM_NAME at $cur_time\" @emails"
+                    "echo \"$PROGRAM_NAME is already running\" | $mail \"UVB: Error report from $PROGRAM_NAME at $cur_time\" @emails"
                     and croak $ERRNO;
             }
             exit 1;
@@ -56,18 +64,23 @@ BEGIN {
 use Smart::Comments -ENV
     ;    # dpkg libsmart-comments-perl || cpan Smart::Comments
 
-our $VERSION = '0.1';
-
 # Set variables
-my @allowed_uuids;
+my $backup_to;
 my $base_device;
 my $base_dir = $ENV{'HOME'} . '/.local/share/SS/ssbak2bak';
 my $config   = "$base_dir/config.ini";
-my @emails;
+my $mail;    # Defined in check_external_programs();
+my $pid;     # For rsync
 my $real_device;
 my $real_device_base;
+my $rsync;    # Defined in check_external_programs();
+my $rsync_output;
+my $rsync_status_return;
 my $source_dir;
+my $start = time;
 my $symlink;
+my @allowed_uuids;
+my @emails;
 my @symlinks;
 
 # Ensure directory exists
@@ -115,7 +128,7 @@ if ( $EFFECTIVE_USER_ID != 0 ) {
 
 # Verify that e-mail and source dirs make reasonable sense
 foreach (@emails) {
-    if ( $_ !~ m/^\w+[@][\d[:alpha:]\-]{1,}[.]{1,}[\d[:alpha:]-]{2,6}$/xms ) {
+    if ( !m/^\w+[@][\d[:alpha:]\-]{1,}[.]{1,}[\d[:alpha:]-]{2,6}$/xms ) {
         croak "Invalid e-mail address syntax in $_\n";
     }
 }
@@ -143,7 +156,7 @@ if (@symlinks) {
     }
 }
 else {
-    print "Finished\n" or croak $ERRNO;
+    say 'Finished' or croak $ERRNO;
     exit;
 }
 
@@ -181,22 +194,39 @@ sub main {
 
 sub check_external_programs {
 
-    if ( `which rsync` eq q{} ) {
-        print "rsync not found. Attempting to install.\n" or croak $ERRNO;
-        system 'sudo apt-get install rsync --yes' and croak $ERRNO;
+    $rsync = `which rsync`;
+    if ( $rsync eq q{} ) {
+        say 'rsync not found. Attempting to install.' or croak $ERRNO;
+        system 'apt-get install rsync --yes' and croak $ERRNO;
+    }
+    else {
+        chomp $rsync;
+        $rsync = $rsync . ' --archive --hard-links --acls --xattrs --verbose';
     }
 
-    if ( `which mail` eq q{} ) {
-        print "heirloom-mailx not found. Attempting to install.\n"
+    $mail = `which mail`;
+    if ( $mail eq q{} ) {
+        say 'heirloom-mailx not found. Attempting to install.'
             or croak $ERRNO;
-        system 'sudo apt-get install heirloom-mailx --yes'
+        system 'apt-get install heirloom-mailx --yes'
             and croak $ERRNO;
+    }
+    else {
+        chomp $mail;
+        $mail = $mail . ' -s';
+    }
+    if ( !-f $ENV{'HOME'} . '/.mailrc' ) {
+        croak "Local mailrc file not found.\n";
     }
 
     if ( `which msmtp` eq q{} ) {
-        print "msmtp not found. Attempting to install.\n" or croak $ERRNO;
-        system 'sudo apt-get install msmtp --yes' and croak $ERRNO;
+        say 'msmtp not found. Attempting to install.' or croak $ERRNO;
+        system 'apt-get install msmtp --yes' and croak $ERRNO;
     }
+    if ( !-f $ENV{'HOME'} . '/.msmtprc' ) {
+        croak "Local msmtprc file not found.\n";
+    }
+
     return 0;
 }
 
@@ -216,8 +246,8 @@ sub verify {
         || !has_free_space() == 0 )
     {
         system "rm /dev/$symlink" and croak $ERRNO;
-        print
-            "Disk is of insufficient overall size, has less than 10% free space, or has a non-permitted UUID\n"
+        say
+            'Disk is of insufficient overall size, has less than 10% free space, or has a non-permitted UUID'
             or croak $ERRNO;
         next;
     }
@@ -260,32 +290,44 @@ sub has_free_space {
 
 sub backup {
 
+    # Ensure needed directories are made
     my $local_symlink = "/dev/$symlink";
-    my $backup_to     = "/mnt/$symlink";
+    $backup_to = "/mnt/$symlink";
     ### $local_symlink
     ### $backup_to
     ### $source_dir
     if ( !-d $backup_to ) {
         system "mkdir -p $backup_to" and croak $ERRNO;
     }
-    system "mount $local_symlink $backup_to";
+
+    # TODO: It might be best to have the e-mail action as its own sub, and add
+    # these messages to the @other_errors.
+    system "mount $local_symlink $backup_to" and croak $ERRNO;
     sleep 2;
     my $backup_to_full = $backup_to . qw{/} . `hostname`;
     chomp $backup_to_full;
     if ( !-d $backup_to_full ) {
         system "mkdir $backup_to_full" and croak $ERRNO;
     }
-    system
+
+    # Fork so we can keep track of the PID
+    if ( $pid = fork ) {
+        my $childpid = wait;
+        $rsync_status_return = $CHILD_ERROR >> 8;
+    }
+    elsif ( defined $pid ) {
 
         # Mind the trailing / at the end of $source_dir
-        "/usr/bin/rsync --archive --hard-links --acls --xattrs --verbose \"$source_dir/\" \"$backup_to_full\" 2>&1";
-    my $rsync_status_return = $CHILD_ERROR >> 8;
-    my $rsync_status_error  = $ERRNO;
-    my $rsync_output;
+        exec "$rsync \"$source_dir/\" \"$backup_to_full\" 2>&1"
+            or croak $ERRNO;
+    }
+    else {
+        croak "Fork failed: $ERRNO";
+    }
 
-    if ( $rsync_status_return != 0 && $rsync_status_error != 0 ) {
+    if ( $rsync_status_return != 0 ) {
         $rsync_output
-            = "Backup from $source_dir to $backup_to_full experienced problems.\nrsync error code: $rsync_status_return;\nrsync error message: $rsync_status_error\nPlease contact SmartSystems for further assistance.\n";
+            = "Backup from $source_dir to $backup_to_full experienced problems.\nrsync error code: $rsync_status_return;\nPlease contact SmartSystems for further assistance.\n";
         ### $rsync_output
     }
     else {
@@ -294,13 +336,38 @@ sub backup {
         ### $rsync_output
     }
 
-    system "umount $backup_to" and croak $ERRNO;
-    system "rmdir $backup_to"  and croak $ERRNO;
-    system "rm /dev/$symlink"  and croak $ERRNO;
+# Clean up after ourselves; ensure we don't croak otherwise we'll never get to the output
+    my @other_errors;
+
+    system "umount $backup_to" and push @other_errors, "\n$ERRNO";
+    system "rmdir $backup_to"  and push @other_errors, "\n$ERRNO";
+    system "rm /dev/$symlink"  and push @other_errors, "\n$ERRNO";
     my $cur_time = strftime '%c', localtime;
-    system
-        "echo \"$rsync_output\" | /usr/bin/mail -s \"UVB: Backup report from $source_dir at $cur_time\" @emails"
-        and croak $ERRNO;
+    my $duration = time - $start;
+    ### $duration
+    if (@other_errors) {
+        say "@other_errors" or croak $ERRNO;
+        system
+            "echo \"$rsync_output\" \"\n@other_errors\" \nDuration: $duration | $mail \"UVB: Backup report from $source_dir at $cur_time\" @emails"
+            and croak $ERRNO;
+        return 1;
+    }
+    else {
+        system
+            "echo \"$rsync_output\" \nDuration: $duration | $mail \"UVB: Backup report from $source_dir at $cur_time\" @emails"
+            and croak $ERRNO;
+        return 0;
+    }
+}
+
+sub cleanup {
+    say 'Script terminated, cleaning up...' or croak $ERRNO;
+    system "umount $backup_to";
+    system "rmdir $backup_to";
+    system "rm /dev/$symlink";
+
+    # Kill rsync
+    kill 'SIGTERM', $pid;
     return 0;
 }
 
@@ -312,10 +379,28 @@ __END__
 
 Changelog:
 
+0.2:
+    -Added 'UVB:' to the subject line in the e-mails for easier sorting
+    -Changed the logic of the final 'system' commands to collect any errors in
+     an array instead of croaking and show them on-screen and in the e-mail
+    -Made mailx and rsync locations and parameters into variables instead of
+     being hard-coded, defined during the check for existence
+        -Made adjustments to the init block to follow suit
+    -Added checks for ~/.mailrc and ~/.msmtprc, croaking if they're not found
+    -Corrected an error in the documentation which claimed the disk needed to
+     be >=128GB when in fact it must be >=500GB
+    -Corrected the omission of the UUID list in the DESCRIPTION
+    -Cleaned up the documentation in general
+    -Added a duration timer which should show up in the e-mail
+    -The call to rsync(1) now explicitly forks, and a signal trap/cleanup
+     routine has been added to deal with the temporary files and ensure rsync(1)
+     dies gracefully in the event of a SIGTERM
+
 0.1:
     -Initial version, based on v0.2 of usb2nas.pl
     -Various cleanups relative to usb2nas.pl
-    -Added basic checks for installed utility programs
+    -Added basic checks for installed utility programs, assuming a
+     Debian/Ubuntu operating environment
 
 =end comment
 
@@ -342,14 +427,15 @@ ssbak2bak -- Backs up from a local machine to USB based on a udev rule
 =head1 DESCRIPTION
 
 Intended to be used in conjunction with a udev rule, this script looks at all
-external drives on the system and should it be larger than 128 gigabytes and
-have at least 10% free space it will be backed up to, and then notify you via
-e-mail. Requires root access and pre-configuration of the mail elements,
-detailed under L<CONFIGURATION|CONFIGURATION>. Assumes one partition is present
-on the target disk; if more than one is present, be aware that the first
-partition (e.g. /dev/sda1) will be used. Also assumes that the disk structure
-follows the pattern of either 'sdX' or 'xvdX', as it is intended originally for
-running under a Xen hypervisor.
+external drives on the system; should any be larger than 500 gigabytes, have at
+least 10% free space, and be on the list of approved drives (determined via
+UUID) it will be backed up to, and then notify you via e-mail. Requires root
+access and pre-configuration of the mail elements, detailed under
+L<CONFIGURATION|CONFIGURATION>. Assumes one partition is present on the target
+disk; if more than one is present, be aware that the first partition (e.g.
+/dev/sda1) will be used. Also assumes that the disk structure follows the
+pattern of either 'sdX' or 'xvdX', as it is intended originally for running
+under a Xen hypervisor.
 
 =head1 REQUIRED ARGUMENTS
 
@@ -358,15 +444,15 @@ detailed in L<USAGE|USAGE>.
 
 =head1 OPTIONS
 
-See L<USAGE|USAGE>. There's really nothing to configure here at the moment
-aside from local debug output.
+See L<USAGE|USAGE>. Further details on formatting are found under
+L<CONFIGURATION|CONFIGURATION>.
 
 =head1 DIAGNOSTICS
 
-Ensure that your .msmtprc, your ~/.mailrc, and your udev rule are configured
-correctly; ensure also that L<rsync(1)|rsync(1)> is installed correctly.
-Sample configurations for the udev rule and msmtp are provided below. Don't
-forget to chmod ~/.msmtprc to 600 (r-w only for the user)
+Ensure that your ~/.msmtprc, your ~/.mailrc, and your udev rules both exist and
+are configured correctly. Sample configurations for the udev rule, and
+~/.msmtprc are provided below. Don't forget to chmod ~/.msmtprc to 600 (r-w
+only for the user)
 
 =head1 EXIT STATUS
 
@@ -379,7 +465,7 @@ Sample /etc/udev/rules.d/backup.rules:
 
     # Backup rules
     SUBSYSTEM=="block", ACTION=="add", KERNEL=="xvd*", SYMLINK+="safety%k"
-    SUBSYSTEM=="block", ACTION=="add", KERNEL=="xvd[ef]1", RUN+="bash -c 'export HOME=/home/foo && /home/foo/.local/bin/ssbak2bak/ssbak2bak.pl | at now'"
+    SUBSYSTEM=="block", ACTION=="add", KERNEL=="xvd[e-z]1", RUN+="bash -c 'export HOME=/home/foo && /home/foo/.local/bin/ssbak2bak/ssbak2bak.pl | at now'"
 
 What this does is check for any drive that is successfully added, then creates
 a symlink to it and every partition on it for safety's sake. It then runs the
@@ -389,8 +475,10 @@ reason, this script will only allow itself to be started once, using
 Fcntl ':flock'.
 
 It also requires e-mail to be configured, specifically requiring
-L<mail(1)|mail(1)> and L<msmtp(1)|msmtp(1)>. You'll need to add 'set
-sendmail="/usr/bin/msmtp"' to your ~/.mailrc or /etc/mailrc as well.
+L<mail(1)|mail(1)> and L<msmtp(1)|msmtp(1)>.
+
+B<You'll need to add 'set sendmail="/usr/bin/msmtp"' to your ~/.mailrc or /etc/mailrc as well.>
+
 For reference, here's a sample .msmtprc:
 
     account Test
@@ -448,6 +536,19 @@ Cory Sadowski <cory@smartsystemsaz.com>
 
 =head1 LICENSE AND COPYRIGHT
 
-To be determined.
+(c) 2015 SmartSystems, Inc.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 =cut
