@@ -17,7 +17,7 @@ use Pod::Usage;                                 # Built-in
 use feature 'say';
 use sigtrap qw/handler cleanup normal-signals/;
 
-our $VERSION = '0.2';
+our $VERSION = '0.3';
 
 INIT {
     if ( !flock main::DATA, LOCK_EX | LOCK_NB ) {
@@ -74,6 +74,8 @@ my $pid;     # For rsync
 my $real_device;
 my $real_device_base;
 my $rsync;    # Defined in check_external_programs();
+my $rsync_start_time;
+my $rsync_stop_time;
 my $rsync_output;
 my $rsync_status_return;
 my $source_dir;
@@ -318,6 +320,8 @@ sub backup {
     elsif ( defined $pid ) {
 
         # Mind the trailing / at the end of $source_dir
+        $rsync_start_time = strftime '%F %T', localtime;
+        ### $rsync_start_time
         exec "$rsync \"$source_dir/\" \"$backup_to_full\" 2>&1"
             or croak $ERRNO;
     }
@@ -342,19 +346,35 @@ sub backup {
     system "umount $backup_to" and push @other_errors, "\n$ERRNO";
     system "rmdir $backup_to"  and push @other_errors, "\n$ERRNO";
     system "rm /dev/$symlink"  and push @other_errors, "\n$ERRNO";
+    $rsync_stop_time = strftime '%F %T', localtime;
+    ### $rsync_stop_time
     my $cur_time = strftime '%c', localtime;
     my $duration = time - $start;
     ### $duration
     if (@other_errors) {
         say "@other_errors" or croak $ERRNO;
-        system
-            "echo \"$rsync_output\" \"\n@other_errors\" \nDuration: $duration | $mail \"UVB: Backup report from $source_dir at $cur_time\" @emails"
+        my $email_output
+            = "\"$rsync_output\" \"\n@other_errors\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration";
+        my $email_subject
+            = "\"UVB: [WARNING] Backup report from $source_dir at $cur_time\"";
+        ### $email_output
+        ### $email_subject
+        system "echo $email_output | $mail $email_subject @emails"
+
+#"echo \"$rsync_output\" \"\n@other_errors\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration | $mail \"UVB: [WARNING] Backup report from $source_dir at $cur_time\" @emails"
             and croak $ERRNO;
         return 1;
     }
     else {
-        system
-            "echo \"$rsync_output\" \nDuration: $duration | $mail \"UVB: Backup report from $source_dir at $cur_time\" @emails"
+        my $email_output
+            = "\"$rsync_output\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration";
+        my $email_subject
+            = "\"UVB: [SUCCESS] Backup report from $source_dir at $cur_time\"";
+        ### $email_output
+        ### $email_subject
+        system "echo $email_output | $mail $email_subject @emails"
+
+#"echo \"$rsync_output\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration | $mail \"UVB: [SUCCESS] Backup report from $source_dir at $cur_time\" @emails"
             and croak $ERRNO;
         return 0;
     }
@@ -378,6 +398,9 @@ __END__
 =begin comment
 
 Changelog:
+
+0.3:
+    -Reorganised the e-mail into concrete parts. Added SUCCESS and WARNING tags along with %F %T timestamps
 
 0.2:
     -Added 'UVB:' to the subject line in the e-mails for easier sorting
@@ -549,6 +572,6 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
+along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 =cut
