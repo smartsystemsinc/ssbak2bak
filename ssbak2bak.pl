@@ -74,10 +74,13 @@ my $pid;     # For rsync
 my $real_device;
 my $real_device_base;
 my $rsync;    # Defined in check_external_programs();
-my $rsync_start_time;
-my $rsync_stop_time;
+my $rsync_log = "$base_dir/rsync.log";
+my $rsync_options
+    = " --archive --hard-links --acls --xattrs --verbose --log-file=$rsync_log";
 my $rsync_output;
+my $rsync_start_time;
 my $rsync_status_return;
+my $rsync_stop_time;
 my $source_dir;
 my $start = time;
 my $symlink;
@@ -203,7 +206,7 @@ sub check_external_programs {
     }
     else {
         chomp $rsync;
-        $rsync = $rsync . ' --archive --hard-links --acls --xattrs --verbose';
+        $rsync = $rsync . $rsync_options;
     }
 
     $mail = `which mail`;
@@ -353,8 +356,17 @@ sub backup {
     ### $duration
     if (@other_errors) {
         say "@other_errors" or croak $ERRNO;
+        my $log_output;
+        {
+            local $INPUT_RECORD_SEPARATOR = undef;
+            open my $fh, '<', $rsync_log
+                or carp "can't open $rsync_log $ERRNO";
+            close $fh or carp $ERRNO;
+            $log_output = <$fh>;
+        }
+
         my $email_output
-            = "\"$rsync_output\" \"\n@other_errors\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration";
+            = "\"$rsync_output\" \"\n@other_errors\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration\nLog file output:$log_output";
         my $email_subject
             = "\"UVB: [WARNING] Backup report from $source_dir at $cur_time\"";
         ### $email_output
@@ -363,6 +375,7 @@ sub backup {
 
 #"echo \"$rsync_output\" \"\n@other_errors\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration | $mail \"UVB: [WARNING] Backup report from $source_dir at $cur_time\" @emails"
             and croak $ERRNO;
+        system "rm $rsync_log";
         return 1;
     }
     else {
@@ -385,6 +398,7 @@ sub cleanup {
     system "umount $backup_to";
     system "rmdir $backup_to";
     system "rm /dev/$symlink";
+    system "rm $rsync_log";
 
     # Kill rsync
     kill 'SIGTERM', $pid;
@@ -401,6 +415,7 @@ Changelog:
 
 0.3:
     -Reorganised the e-mail into concrete parts. Added SUCCESS and WARNING tags along with %F %T timestamps
+    -Added rsync log files to the e-mail body; the log is deleted afterwards or on SIGTERM
 
 0.2:
     -Added 'UVB:' to the subject line in the e-mails for easier sorting
