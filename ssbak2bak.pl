@@ -373,8 +373,8 @@ sub backup {
         local $INPUT_RECORD_SEPARATOR = undef;
         open my $fh, '<', $rsync_log
             or carp "can't open $rsync_log $ERRNO";
-        close $fh or carp $ERRNO;
         $log_output = <$fh>;
+        close $fh or carp $ERRNO;
     }
 
     $email_output
