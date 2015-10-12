@@ -343,7 +343,6 @@ sub backup {
         ### $rsync_output
         $email_subject
             = "\"UVB: [WARNING] Backup report from $source_dir at $cur_time\"";
-        ### $email_output
         ### $email_subject
     }
     else {
@@ -373,12 +372,13 @@ sub backup {
         local $INPUT_RECORD_SEPARATOR = undef;
         open my $fh, '<', $rsync_log
             or carp "can't open $rsync_log $ERRNO";
-        close $fh or carp $ERRNO;
         $log_output = <$fh>;
+        close $fh or carp $ERRNO;
     }
 
     $email_output
         = "\"$rsync_output\" \"\nOther errors:@other_errors\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration\nLog file output:$log_output";
+    ### $email_output
     system "echo $email_output | $mail $email_subject @emails"
         and croak $ERRNO;
     system "rm $rsync_log";
