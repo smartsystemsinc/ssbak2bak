@@ -69,6 +69,8 @@ my $backup_to;
 my $base_device;
 my $base_dir = $ENV{'HOME'} . '/.local/share/SS/ssbak2bak';
 my $config   = "$base_dir/config.ini";
+my $email_subject;
+my $email_output;
 my $mail;    # Defined in check_external_programs();
 my $pid;     # For rsync
 my $real_device;
@@ -207,6 +209,8 @@ sub check_external_programs {
     else {
         chomp $rsync;
         $rsync = $rsync . $rsync_options;
+        ### rsync
+        ### $rsync_options
     }
 
     $mail = `which mail`;
@@ -305,8 +309,6 @@ sub backup {
         system "mkdir -p $backup_to" and croak $ERRNO;
     }
 
-    # TODO: It might be best to have the e-mail action as its own sub, and add
-    # these messages to the @other_errors.
     system "mount $local_symlink $backup_to" and croak $ERRNO;
     sleep 2;
     my $backup_to_full = $backup_to . qw{/} . `hostname`;
@@ -332,15 +334,26 @@ sub backup {
         croak "Fork failed: $ERRNO";
     }
 
+    my $cur_time = strftime '%c', localtime;
+    my $return_code;
     if ( $rsync_status_return != 0 ) {
+        $return_code = 1;
         $rsync_output
             = "Backup from $source_dir to $backup_to_full experienced problems.\nrsync error code: $rsync_status_return;\nPlease contact SmartSystems for further assistance.\n";
         ### $rsync_output
+        $email_subject
+            = "\"UVB: [WARNING] Backup report from $source_dir at $cur_time\"";
+        ### $email_output
+        ### $email_subject
     }
     else {
+        $return_code = 0;
         $rsync_output
             = "Backup from $source_dir to $backup_to_full completed successfully.\nIt is now safe to remove the drive.\n";
         ### $rsync_output
+        $email_subject
+            = "\"UVB: [SUCCESS] Backup report from $source_dir at $cur_time\"";
+        ### $email_subject
     }
 
 # Clean up after ourselves; ensure we don't croak otherwise we'll never get to the output
@@ -349,48 +362,27 @@ sub backup {
     system "umount $backup_to" and push @other_errors, "\n$ERRNO";
     system "rmdir $backup_to"  and push @other_errors, "\n$ERRNO";
     system "rm /dev/$symlink"  and push @other_errors, "\n$ERRNO";
-    $rsync_stop_time = strftime '%F %T', localtime;
-    ### $rsync_stop_time
-    my $cur_time = strftime '%c', localtime;
+    if ( defined $rsync_start_time ) {
+        $rsync_stop_time = strftime '%F %T', localtime;
+        ### $rsync_stop_time
+    }
     my $duration = time - $start;
     ### $duration
-    if (@other_errors) {
-        say "@other_errors" or croak $ERRNO;
-        my $log_output;
-        {
-            local $INPUT_RECORD_SEPARATOR = undef;
-            open my $fh, '<', $rsync_log
-                or carp "can't open $rsync_log $ERRNO";
-            close $fh or carp $ERRNO;
-            $log_output = <$fh>;
-        }
-
-        my $email_output
-            = "\"$rsync_output\" \"\n@other_errors\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration\nLog file output:$log_output";
-        my $email_subject
-            = "\"UVB: [WARNING] Backup report from $source_dir at $cur_time\"";
-        ### $email_output
-        ### $email_subject
-        system "echo $email_output | $mail $email_subject @emails"
-
-#"echo \"$rsync_output\" \"\n@other_errors\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration | $mail \"UVB: [WARNING] Backup report from $source_dir at $cur_time\" @emails"
-            and croak $ERRNO;
-        system "rm $rsync_log";
-        return 1;
+    my $log_output;
+    {
+        local $INPUT_RECORD_SEPARATOR = undef;
+        open my $fh, '<', $rsync_log
+            or carp "can't open $rsync_log $ERRNO";
+        close $fh or carp $ERRNO;
+        $log_output = <$fh>;
     }
-    else {
-        my $email_output
-            = "\"$rsync_output\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration";
-        my $email_subject
-            = "\"UVB: [SUCCESS] Backup report from $source_dir at $cur_time\"";
-        ### $email_output
-        ### $email_subject
-        system "echo $email_output | $mail $email_subject @emails"
 
-#"echo \"$rsync_output\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration | $mail \"UVB: [SUCCESS] Backup report from $source_dir at $cur_time\" @emails"
-            and croak $ERRNO;
-        return 0;
-    }
+    $email_output
+        = "\"$rsync_output\" \"\nOther errors:@other_errors\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration\nLog file output:$log_output";
+    system "echo $email_output | $mail $email_subject @emails"
+        and croak $ERRNO;
+    system "rm $rsync_log";
+    return $return_code;
 }
 
 sub cleanup {
@@ -416,6 +408,7 @@ Changelog:
 0.3:
     -Reorganised the e-mail into concrete parts. Added SUCCESS and WARNING tags along with %F %T timestamps
     -Added rsync log files to the e-mail body; the log is deleted afterwards or on SIGTERM
+    -Re-organised the backup sub-procedure to be less complex and to fix the logic resulting in blank e-mails.
 
 0.2:
     -Added 'UVB:' to the subject line in the e-mails for easier sorting
