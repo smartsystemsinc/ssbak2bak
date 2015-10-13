@@ -381,6 +381,7 @@ sub backup {
 
 #= "\"$rsync_output\" \"\nOther errors:@other_errors\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration\nLog file output:$log_output";
     ### $email_output
+    # This should be quoted, but `sh` keeps interpreting stuff anyway
     system "echo \"$email_output\" | $mail \"$email_subject\" @emails"
         and croak $ERRNO;
     system "rm $rsync_log";
