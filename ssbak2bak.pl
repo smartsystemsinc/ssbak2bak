@@ -23,16 +23,16 @@ INIT {
     if ( !flock main::DATA, LOCK_EX | LOCK_NB ) {
         my @emails;
         my $cur_time = strftime '%c', localtime;
-        my $mail = `which mail`;
-        if ( $mail eq q{} ) {
+        my $mail_bin = `which mail`;
+        if ( $mail_bin eq q{} ) {
             say
                 "heirloom-mailx is not installed and $PROGRAM_NAME is already running"
                 or croak $ERRNO;
             exit 1;
         }
         else {
-            chomp $mail;
-            $mail = $mail . ' -s';
+            chomp $mail_bin;
+            $mail_bin = $mail_bin . ' -s';
         }
 
         # Try to read in parameters from the config file
@@ -49,7 +49,7 @@ INIT {
             say "$PROGRAM_NAME is already running" or croak $ERRNO;
             if (@emails) {
                 system
-                    "echo \"$PROGRAM_NAME is already running\" | $mail \"UVB: Error report from $PROGRAM_NAME at $cur_time\" @emails"
+                    "echo \"$PROGRAM_NAME is already running\" | $mail_bin \"UVB: Error report from $PROGRAM_NAME at $cur_time\" @emails"
                     and croak $ERRNO;
             }
             exit 1;
@@ -71,11 +71,11 @@ my $base_dir = $ENV{'HOME'} . '/.local/share/SS/ssbak2bak';
 my $config   = "$base_dir/config.ini";
 my $email_subject;
 my $email_output;
-my $mail;    # Defined in check_external_programs();
-my $pid;     # For rsync
+my $mail_bin;    # Defined in check_external_programs();
+my $pid;         # For rsync
 my $real_device;
 my $real_device_base;
-my $rsync;    # Defined in check_external_programs();
+my $rsync;       # Defined in check_external_programs();
 my $rsync_log = "$base_dir/rsync.log";
 my $rsync_options
     = " --archive --hard-links --acls --xattrs --verbose --log-file=$rsync_log";
@@ -213,16 +213,16 @@ sub check_external_programs {
         ### $rsync_options
     }
 
-    $mail = `which mail`;
-    if ( $mail eq q{} ) {
+    $mail_bin = `which mail`;
+    if ( $mail_bin eq q{} ) {
         say 'heirloom-mailx not found. Attempting to install.'
             or croak $ERRNO;
         system 'apt-get install heirloom-mailx --yes'
             and croak $ERRNO;
     }
     else {
-        chomp $mail;
-        $mail = $mail . ' -s';
+        chomp $mail_bin;
+        $mail_bin = $mail_bin;
     }
     if ( !-f $ENV{'HOME'} . '/.mailrc' ) {
         croak "Local mailrc file not found.\n";
@@ -379,16 +379,12 @@ sub backup {
     $email_output
         = "$rsync_output\nOther errors:@other_errors\nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration\nLog file output:$log_output";
 
-#= "\"$rsync_output\" \"\nOther errors:@other_errors\" \nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration\nLog file output:$log_output";
     ### $email_output
-    # This should be quoted, but `sh` keeps interpreting stuff anyway
-    my @command = ( "$mail", '-s', $email_subject, @emails );
+    my @command = ( "$mail_bin", '-s', $email_subject, @emails );
     open my $mail, q{|-}, @command or croak $ERRNO;
     printf {$mail} "%s\n", $email_output;
     close $mail or croak $ERRNO;
 
-    # system "echo \"$email_output\" | $mail \"$email_subject\" @emails"
-    #     and croak $ERRNO;
     system "rm $rsync_log";
     return $return_code;
 }
