@@ -317,6 +317,9 @@ sub backup {
         system "mkdir $backup_to_full" and croak $ERRNO;
     }
 
+    $rsync_start_time = strftime '%F %T', localtime;
+    ### $rsync_start_time
+
     # Fork so we can keep track of the PID
     if ( $pid = fork ) {
         my $childpid = wait;
@@ -325,8 +328,6 @@ sub backup {
     elsif ( defined $pid ) {
 
         # Mind the trailing / at the end of $source_dir
-        $rsync_start_time = strftime '%F %T', localtime;
-        ### $rsync_start_time
         exec "$rsync \"$source_dir/\" \"$backup_to_full\" 2>&1"
             or croak $ERRNO;
     }
