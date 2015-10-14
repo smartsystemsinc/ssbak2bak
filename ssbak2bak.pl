@@ -342,7 +342,7 @@ sub backup {
             = "Backup from $source_dir to $backup_to_full experienced problems.\nrsync error code: $rsync_status_return;\nPlease contact SmartSystems for further assistance.\n";
         ### $rsync_output
         $email_subject
-            = "\"UVB: [WARNING] Backup report from $source_dir at $cur_time\"";
+            = "UVB: [WARNING] Backup report from $source_dir at $cur_time";
         ### $email_subject
     }
     else {
