@@ -32,7 +32,6 @@ INIT {
         }
         else {
             chomp $mail_bin;
-            $mail_bin = $mail_bin . ' -s';
         }
 
         # Try to read in parameters from the config file
@@ -48,9 +47,14 @@ INIT {
                 or carp "No e-mail defined -- user cannot be notified\n";
             say "$PROGRAM_NAME is already running" or croak $ERRNO;
             if (@emails) {
-                system
-                    "echo \"$PROGRAM_NAME is already running\" | $mail_bin \"UVB: Error report from $PROGRAM_NAME at $cur_time\" @emails"
-                    and croak $ERRNO;
+                my $email_output = "$PROGRAM_NAME is already running";
+                my $email_subject
+                    = "UVB: Error report from $PROGRAM_NAME at $cur_time";
+                ### $email_output
+                my @command = ( "$mail_bin", '-s', $email_subject, @emails );
+                open my $mail, q{|-}, @command or croak $ERRNO;
+                printf {$mail} "%s\n", $email_output;
+                close $mail or croak $ERRNO;
             }
             exit 1;
         }
@@ -222,7 +226,6 @@ sub check_external_programs {
     }
     else {
         chomp $mail_bin;
-        $mail_bin = $mail_bin;
     }
     if ( !-f $ENV{'HOME'} . '/.mailrc' ) {
         croak "Local mailrc file not found.\n";
