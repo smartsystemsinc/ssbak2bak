@@ -351,7 +351,7 @@ sub backup {
             = "Backup from $source_dir to $backup_to_full completed successfully.\nIt is now safe to remove the drive.\n";
         ### $rsync_output
         $email_subject
-            = "\"UVB: [SUCCESS] Backup report from $source_dir at $cur_time\"";
+            = "UVB: [SUCCESS] Backup report from $source_dir at $cur_time";
         ### $email_subject
     }
 
