@@ -419,6 +419,7 @@ Changelog:
     -Reorganised the e-mail into concrete parts. Added SUCCESS and WARNING tags along with %F %T timestamps
     -Added rsync log files to the e-mail body; the log is deleted afterwards or on SIGTERM
     -Re-organised the backup sub-procedure to be less complex and to fix the logic resulting in blank e-mails.
+    -Adjusted the logic in the INIT block to prevent a misleading error message.
 
 0.2:
     -Added 'UVB:' to the subject line in the e-mails for easier sorting
