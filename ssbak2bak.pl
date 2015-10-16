@@ -43,8 +43,7 @@ INIT {
             @emails = $cfg->param('emails');
 
             # Override parameters if entered on the command line
-            GetOptions( 'emails|e:s{,}' => \@emails, )
-                or carp "No e-mail defined -- user cannot be notified\n";
+            GetOptions( 'emails|e:s{,}' => \@emails, );
             say "$PROGRAM_NAME is already running" or croak $ERRNO;
             if (@emails) {
                 my $email_output = "$PROGRAM_NAME is already running";
@@ -55,6 +54,9 @@ INIT {
                 open my $mail, q{|-}, @command or croak $ERRNO;
                 printf {$mail} "%s\n", $email_output;
                 close $mail or croak $ERRNO;
+            }
+            else {
+                carp "No e-mail defined -- user cannot be notified\n";
             }
             exit 1;
         }
