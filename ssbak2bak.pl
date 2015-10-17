@@ -23,15 +23,14 @@ INIT {
     if ( !flock main::DATA, LOCK_EX | LOCK_NB ) {
         my @emails;
         my $cur_time = strftime '%c', localtime;
-        my $mail_bin = `which mail`;
-        if ( $mail_bin eq q{} ) {
-            say
-                "heirloom-mailx is not installed and $PROGRAM_NAME is already running"
+        my $mutt_bin = `which mail`;
+        if ( $mutt_bin eq q{} ) {
+            say "mutt is not installed and $PROGRAM_NAME is already running"
                 or croak $ERRNO;
             exit 1;
         }
         else {
-            chomp $mail_bin;
+            chomp $mutt_bin;
         }
 
         # Try to read in parameters from the config file
@@ -50,7 +49,7 @@ INIT {
                 my $email_subject
                     = "UVB: Error report from $PROGRAM_NAME at $cur_time";
                 ### $email_output
-                my @command = ( "$mail_bin", '-s', $email_subject, @emails );
+                my @command = ( "$mutt_bin", '-s', $email_subject, @emails );
                 open my $mail, q{|-}, @command or croak $ERRNO;
                 printf {$mail} "%s\n", $email_output;
                 close $mail or croak $ERRNO;
@@ -77,12 +76,13 @@ my $base_dir = $ENV{'HOME'} . '/.local/share/SS/ssbak2bak';
 my $config   = "$base_dir/config.ini";
 my $email_subject;
 my $email_output;
-my $mail_bin;    # Defined in check_external_programs();
+my $mutt_bin;    # Defined in check_external_programs();
 my $pid;         # For rsync
 my $real_device;
 my $real_device_base;
 my $rsync;       # Defined in check_external_programs();
-my $rsync_log = "$base_dir/rsync.log";
+my $rsync_log            = "$base_dir/rsync.log";
+my $rsync_log_compressed = "$base_dir/rsync_log.tar.gz";
 my $rsync_options
     = " --archive --hard-links --acls --xattrs --verbose --log-file=$rsync_log";
 my $rsync_output;
@@ -219,15 +219,18 @@ sub check_external_programs {
         ### $rsync_options
     }
 
-    $mail_bin = `which mail`;
-    if ( $mail_bin eq q{} ) {
-        say 'heirloom-mailx not found. Attempting to install.'
+    $mutt_bin = `which mutt`;
+
+    # Avoiding installing recommended programs because it'll pull in postfix,
+    # which could break the automation since it requires initial configuration
+    if ( $mutt_bin eq q{} ) {
+        say 'mutt not found. Attempting to install.'
             or croak $ERRNO;
-        system 'apt-get install heirloom-mailx --yes'
+        system 'apt-get install mutt --yes --no-install-recommends'
             and croak $ERRNO;
     }
     else {
-        chomp $mail_bin;
+        chomp $mutt_bin;
     }
     if ( !-f $ENV{'HOME'} . '/.mailrc' ) {
         croak "Local mailrc file not found.\n";
@@ -367,31 +370,29 @@ sub backup {
     system "umount $backup_to" and push @other_errors, "\n$ERRNO";
     system "rmdir $backup_to"  and push @other_errors, "\n$ERRNO";
     system "rm /dev/$symlink"  and push @other_errors, "\n$ERRNO";
+    system "tar -cvzf $rsync_log_compressed $rsync_log"
+        and push @other_errors, "\n$ERRNO";
     if ( defined $rsync_start_time ) {
         $rsync_stop_time = strftime '%F %T', localtime;
         ### $rsync_stop_time
     }
     my $duration = time - $start;
     ### $duration
-    my $log_output;
-    {
-        local $INPUT_RECORD_SEPARATOR = undef;
-        open my $fh, '<', $rsync_log
-            or carp "can't open $rsync_log $ERRNO";
-        $log_output = <$fh>;
-        close $fh or carp $ERRNO;
-    }
 
     $email_output
-        = "$rsync_output\nOther errors:@other_errors\nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration\nLog file output:$log_output";
+        = "$rsync_output\nOther errors:@other_errors\nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration\n";
 
     ### $email_output
-    my @command = ( "$mail_bin", '-s', $email_subject, @emails );
+    my @command = (
+        "$mutt_bin", '-s', $email_subject, '-a', $rsync_log_compressed,
+        @emails,
+    );
     open my $mail, q{|-}, @command or croak $ERRNO;
     printf {$mail} "%s\n", $email_output;
     close $mail or croak $ERRNO;
 
     system "rm $rsync_log";
+    system "rm $rsync_log_compressed";
     return $return_code;
 }
 
@@ -401,6 +402,7 @@ sub cleanup {
     system "rmdir $backup_to";
     system "rm /dev/$symlink";
     system "rm $rsync_log";
+    system "rm $rsync_log_compressed";
 
     # Kill rsync
     kill 'SIGTERM', $pid;
@@ -420,6 +422,8 @@ Changelog:
     -Added rsync log files to the e-mail body; the log is deleted afterwards or on SIGTERM
     -Re-organised the backup sub-procedure to be less complex and to fix the logic resulting in blank e-mails.
     -Adjusted the logic in the INIT block to prevent a misleading error message.
+    -Changed the mailer to mutt in order to handle attachments.
+    -Changed rsync log logic so that it compresses it first and then attaches it to the e-mail.
 
 0.2:
     -Added 'UVB:' to the subject line in the e-mails for easier sorting
@@ -491,10 +495,11 @@ L<CONFIGURATION|CONFIGURATION>.
 
 =head1 DIAGNOSTICS
 
-Ensure that your ~/.msmtprc, your ~/.mailrc, and your udev rules both exist and
+Ensure that your ~/.msmtprc, your ~/.muttrc, and your udev rules both exist and
 are configured correctly. Sample configurations for the udev rule, and
 ~/.msmtprc are provided below. Don't forget to chmod ~/.msmtprc to 600 (r-w
-only for the user)
+only for the user). For ~/.muttrc, ensure that it at least contains the line 
+B<set sendmail="/usr/bin/msmtp">
 
 =head1 EXIT STATUS
 
@@ -554,10 +559,10 @@ Perl:
 External:
 
     -df (coreutils)
+    -msmtp (msmtp)
+    -mutt (mutt or mutt-patched)
     -readlink (coreutils)
     -rsync (rsync)
-    -mail (heirloom-mailx)
-    -msmtp (msmtp)
     -udev (udev)
     -udev rules
 
