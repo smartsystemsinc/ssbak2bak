@@ -385,7 +385,7 @@ sub backup {
     ### $email_output
     my @command = (
         "$mutt_bin", '-s', $email_subject, '-a', $rsync_log_compressed,
-        @emails,
+        q{--}, @emails,
     );
     open my $mail, q{|-}, @command or croak $ERRNO;
     printf {$mail} "%s\n", $email_output;
