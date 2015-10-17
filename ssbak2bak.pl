@@ -496,10 +496,9 @@ L<CONFIGURATION|CONFIGURATION>.
 =head1 DIAGNOSTICS
 
 Ensure that your ~/.msmtprc, your ~/.muttrc, and your udev rules both exist and
-are configured correctly. Sample configurations for the udev rule, and
-~/.msmtprc are provided below. Don't forget to chmod ~/.msmtprc to 600 (r-w
-only for the user). For ~/.muttrc, ensure that it at least contains the line 
-B<set sendmail="/usr/bin/msmtp">
+are configured correctly. Sample configurations for the udev rule, ~/.muttrc,
+and ~/.msmtprc are provided below. Don't forget to chmod ~/.msmtprc to 600 (r-w
+only for the user).
 
 =head1 EXIT STATUS
 
@@ -525,6 +524,14 @@ It also requires e-mail to be configured, specifically requiring
 L<mail(1)|mail(1)> and L<msmtp(1)|msmtp(1)>.
 
 B<You'll need to add 'set sendmail="/usr/bin/msmtp"' to your ~/.mailrc or /etc/mailrc as well.>
+
+For reference, here's a sample .muttrc:
+
+    set sendmail="/usr/bin/msmtp"
+    set realname=ssbak2bak
+    set use_from=yes
+    set from=foo@mycompany.com
+    set envelope_from=yes
 
 For reference, here's a sample .msmtprc:
 
