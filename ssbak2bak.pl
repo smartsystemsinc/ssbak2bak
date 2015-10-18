@@ -45,14 +45,12 @@ INIT {
             GetOptions( 'emails|e:s{,}' => \@emails, );
             say "$PROGRAM_NAME is already running" or croak $ERRNO;
             if (@emails) {
-                my $email_output = "$PROGRAM_NAME is already running";
                 my $email_subject
                     = "UVB: Error report from $PROGRAM_NAME at $cur_time";
+                ### $email_subject
+                my $email_output = "$PROGRAM_NAME is already running";
                 ### $email_output
-                my @command = ( "$mutt_bin", '-s', $email_subject, @emails );
-                open my $mail, q{|-}, @command or croak $ERRNO;
-                printf {$mail} "%s\n", $email_output;
-                close $mail or croak $ERRNO;
+                mailer( $email_subject, $email_output );
             }
             else {
                 carp "No e-mail defined -- user cannot be notified\n";
@@ -259,12 +257,12 @@ sub get_symlinks {
 
 sub verify {
     if (   !is_permitted() == 0
-        || !is_large_enough() == 0
-        || !has_free_space() == 0 )
+        || !is_large_enough() == 0 )
+
+        #|| !has_free_space() == 0 )
     {
         system "rm /dev/$symlink" and croak $ERRNO;
-        say
-            'Disk is of insufficient overall size, has less than 10% free space, or has a non-permitted UUID'
+        say 'Disk is of insufficient overall size or has a non-permitted UUID'
             or croak $ERRNO;
         next;
     }
@@ -295,8 +293,10 @@ sub is_large_enough {
 }
 
 sub has_free_space {
-    my $space_used = `df /dev/$base_device`;
+    my $partition  = shift;
+    my $space_used = `df $partition`;
     ($space_used) = ( $space_used =~ /([[:digit:]]+)%/xms );
+    ### $space_used
     if ( $space_used < 90 ) {
         return 0;
     }
@@ -319,6 +319,19 @@ sub backup {
 
     system "mount $local_symlink $backup_to" and croak $ERRNO;
     sleep 2;
+    if ( !has_free_space($backup_to) == 1 ) {
+        my $cur_time = strftime '%c', localtime;
+        $email_subject
+            = "UVB: [WARNING] Backup report from $source_dir at $cur_time";
+        ### $email_subject
+        $email_output
+            = "$backup_to has less than 10% free space remaining; backup terminated";
+        ### $email_output
+        mailer( $email_subject, $email_output );
+        system "umount $backup_to";
+        system "rmdir $backup_to";
+        system "rm /dev/$symlink";
+    }
     my $backup_to_full = $backup_to . qw{/} . `hostname`;
     chomp $backup_to_full;
     if ( !-d $backup_to_full ) {
@@ -383,17 +396,30 @@ sub backup {
         = "$rsync_output\nOther errors:@other_errors\nStart time: $rsync_start_time\nStop time: $rsync_stop_time\nDuration: $duration\n";
 
     ### $email_output
-    my @command = (
-        "$mutt_bin", '-s', $email_subject, '-a', $rsync_log_compressed,
-        q{--}, @emails,
-    );
-    open my $mail, q{|-}, @command or croak $ERRNO;
-    printf {$mail} "%s\n", $email_output;
-    close $mail or croak $ERRNO;
-
+    mailer( $email_subject, $email_output );
     system "rm $rsync_log";
     system "rm $rsync_log_compressed";
     return $return_code;
+}
+
+sub mailer {
+    my $subject = shift;
+    my $message = shift;
+    my @command;
+
+    if ( -e $rsync_log_compressed ) {
+        @command = (
+            "$mutt_bin", '-s', $subject, '-a', $rsync_log_compressed,
+            q{--}, @emails,
+        );
+    }
+    else {
+        @command = ( "$mutt_bin", '-s', $subject, @emails, );
+    }
+    open my $mail, q{|-}, @command or croak $ERRNO;
+    printf {$mail} "%s\n", $message;
+    close $mail or croak $ERRNO;
+    return 0;
 }
 
 sub cleanup {
@@ -424,6 +450,9 @@ Changelog:
     -Adjusted the logic in the INIT block to prevent a misleading error message.
     -Changed the mailer to mutt in order to handle attachments.
     -Changed rsync log logic so that it compresses it first and then attaches it to the e-mail.
+    -Realised that the disk usage check wasn't working as intended; moved the check to the beginning of the
+     backup block so that it could access the partition correctly.
+    -Made the mail-sending into a sub-routine.
 
 0.2:
     -Added 'UVB:' to the subject line in the e-mails for easier sorting
