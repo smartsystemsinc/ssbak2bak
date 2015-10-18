@@ -319,7 +319,7 @@ sub backup {
 
     system "mount $local_symlink $backup_to" and croak $ERRNO;
     sleep 2;
-    if ( !has_free_space($backup_to) == 1 ) {
+    if ( has_free_space($backup_to) == 1 ) {
         my $cur_time = strftime '%c', localtime;
         $email_subject
             = "UVB: [WARNING] Backup report from $source_dir at $cur_time";
