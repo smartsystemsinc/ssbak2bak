@@ -82,7 +82,7 @@ my $rsync;       # Defined in check_external_programs();
 my $rsync_log            = "$base_dir/rsync.log";
 my $rsync_log_compressed = "$base_dir/rsync_log.tar.gz";
 my $rsync_options
-    = " --archive --hard-links --acls --xattrs --verbose --log-file=$rsync_log";
+    = " --archive --hard-links --acls --xattrs --delete --verbose --log-file=$rsync_log";
 my $rsync_output;
 my $rsync_start_time;
 my $rsync_status_return;
