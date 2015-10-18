@@ -331,6 +331,7 @@ sub backup {
         system "umount $backup_to";
         system "rmdir $backup_to";
         system "rm /dev/$symlink";
+        return 1;
     }
     my $backup_to_full = $backup_to . qw{/} . `hostname`;
     chomp $backup_to_full;
