@@ -406,21 +406,37 @@ sub backup {
 sub mailer {
     my $subject = shift;
     my $message = shift;
+    my $filesize;
     my @command;
 
     if ( -e $rsync_log_compressed ) {
-        @command = (
-            "$mutt_bin", '-s', $subject, '-a', $rsync_log_compressed,
-            q{--}, @emails,
-        );
+        $filesize = attachment_size_check($rsync_log_compressed);
+        if ( $filesize <= 10 ) {
+            @command = (
+                "$mutt_bin", '-s', $subject, '-a', $rsync_log_compressed,
+                q{--}, @emails,
+            );
+        }
+        elsif ( $filesize > 10 ) {
+            $message = $message . "Log not included; filesize of $filesize\n";
+            @command = ( "$mutt_bin", '-s', $subject, @emails, );
+        }
     }
     else {
+        $message
+            = $message . "Log not included; file not present or removed\n";
         @command = ( "$mutt_bin", '-s', $subject, @emails, );
     }
     open my $mail, q{|-}, @command or croak $ERRNO;
     printf {$mail} "%s\n", $message;
     close $mail or croak $ERRNO;
     return 0;
+}
+
+sub attachment_size_check {
+    my $attachment = shift;
+    my $filesize_in_mb = ( -s $attachment ) / ( 1024 * 1024 );
+    return $filesize_in_mb;
 }
 
 sub cleanup {
