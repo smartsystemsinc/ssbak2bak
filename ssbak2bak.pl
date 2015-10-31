@@ -470,6 +470,7 @@ Changelog:
     -Realised that the disk usage check wasn't working as intended; moved the check to the beginning of the
      backup block so that it could access the partition correctly.
     -Made the mail-sending into a sub-routine.
+    -Added logic to ensure the attachment is of a reasonable size before allowing it to be attached.
 
 0.2:
     -Added 'UVB:' to the subject line in the e-mails for easier sorting
