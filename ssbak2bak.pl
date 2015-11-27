@@ -403,6 +403,7 @@ sub mailer {
     my $subject = shift;
     my $message = shift;
     my $filesize;
+    my $rsync_log_compressed_new = $rsync_stop_time . $rsync_log_compressed;
     my @command;
 
     if ( -e $rsync_log_compressed ) {
@@ -414,13 +415,14 @@ sub mailer {
             );
         }
         elsif ( $filesize > 10 ) {
-            $message = $message . "Log not included; filesize of $filesize\n";
+            $message = $message
+                . "Log not included; filesize of $filesize.\nLog file saved as $rsync_log_compressed_new.\n";
             @command = ( "$mutt_bin", '-s', $subject, @emails, );
         }
     }
     else {
         $message
-            = $message . "Log not included; file not present or removed\n";
+            = $message . "Log not included; file not present or removed.\n";
         @command = ( "$mutt_bin", '-s', $subject, @emails, );
     }
     open my $mail, q{|-}, @command or croak $ERRNO;
@@ -431,8 +433,6 @@ sub mailer {
         unlink $rsync_log_compressed or carp $ERRNO;
     }
     else {
-        my $rsync_log_compressed_new
-            = $rsync_log_compressed . $rsync_stop_time;
         rename $rsync_log_compressed, $rsync_log_compressed_new
             or carp $ERRNO;
     }
