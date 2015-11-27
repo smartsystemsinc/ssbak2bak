@@ -17,7 +17,7 @@ use Pod::Usage;                                 # Built-in
 use feature 'say';
 use sigtrap qw/handler cleanup normal-signals/;
 
-our $VERSION = '0.3';
+our $VERSION = '0.3a';
 
 INIT {
     if ( !flock main::DATA, LOCK_EX | LOCK_NB ) {
@@ -258,8 +258,6 @@ sub get_symlinks {
 sub verify {
     if (   !is_permitted() == 0
         || !is_large_enough() == 0 )
-
-        #|| !has_free_space() == 0 )
     {
         system "rm /dev/$symlink" and croak $ERRNO;
         say 'Disk is of insufficient overall size or has a non-permitted UUID'
@@ -398,8 +396,6 @@ sub backup {
 
     ### $email_output
     mailer( $email_subject, $email_output );
-    system "rm $rsync_log";
-    system "rm $rsync_log_compressed";
     return $return_code;
 }
 
@@ -430,6 +426,16 @@ sub mailer {
     open my $mail, q{|-}, @command or croak $ERRNO;
     printf {$mail} "%s\n", $message;
     close $mail or croak $ERRNO;
+    unlink $rsync_log or carp $ERRNO;
+    if ( attachment_size_check($rsync_log_compressed) <= 10 ) {
+        unlink $rsync_log_compressed or carp $ERRNO;
+    }
+    else {
+        my $rsync_log_compressed_new
+            = $rsync_log_compressed . $rsync_stop_time;
+        rename $rsync_log_compressed, $rsync_log_compressed_new
+            or carp $ERRNO;
+    }
     return 0;
 }
 
@@ -441,14 +447,15 @@ sub attachment_size_check {
 
 sub cleanup {
     say 'Script terminated, cleaning up...' or croak $ERRNO;
-    system "umount $backup_to";
-    system "rmdir $backup_to";
-    system "rm /dev/$symlink";
-    system "rm $rsync_log";
-    system "rm $rsync_log_compressed";
+    system "umount $backup_to"              or carp $ERRNO;
+    system "rmdir $backup_to"               or carp $ERRNO;
+    system "rm /dev/$symlink"               or carp $ERRNO;
+
+    # unlink $rsync_log or carp $ERRNO;
+    # unlink $rsync_log_compressed or carp $ERRNO;
 
     # Kill rsync
-    kill 'SIGTERM', $pid;
+    kill 'SIGTERM', $pid or carp $ERRNO;
     return 0;
 }
 
@@ -460,9 +467,15 @@ __END__
 
 Changelog:
 
+0.3a:
+    -Corrected oversight by renaming the compressed log file if it is too big
+     instead of immediately deleting it.
+    -Updated documentation to reflect this.
+    -Switched a few system rm commands for unlink where it made sense to do so.
+
 0.3:
-    -Reorganised the e-mail into concrete parts. Added SUCCESS and WARNING tags along with %F %T timestamps
-    -Added rsync log files to the e-mail body; the log is deleted afterwards or on SIGTERM
+    -Reorganised the e-mail into concrete parts. Added SUCCESS and WARNING tags along with %F %T timestamps.
+    -Added rsync log files to the e-mail body; the log is deleted afterwards or on SIGTERM.
     -Re-organised the backup sub-procedure to be less complex and to fix the logic resulting in blank e-mails.
     -Adjusted the logic in the INIT block to prevent a misleading error message.
     -Changed the mailer to mutt in order to handle attachments.
@@ -524,11 +537,12 @@ external drives on the system; should any be larger than 500 gigabytes, have at
 least 10% free space, and be on the list of approved drives (determined via
 UUID) it will be backed up to, and then notify you via e-mail. Requires root
 access and pre-configuration of the mail elements, detailed under
-L<CONFIGURATION|CONFIGURATION>. Assumes one partition is present on the target
-disk; if more than one is present, be aware that the first partition (e.g.
-/dev/sda1) will be used. Also assumes that the disk structure follows the
-pattern of either 'sdX' or 'xvdX', as it is intended originally for running
-under a Xen hypervisor.
+L<CONFIGURATION|CONFIGURATION>. Note that if the compressed log file is too big
+to send via e-mail (> 10MB), it is renamed with the current date/time. Assumes
+one partition is present on the target disk; if more than one is present, be
+aware that the first partition (e.g. /dev/sda1) will be used. Also assumes that
+the disk structure follows the pattern of either 'sdX' or 'xvdX', as it is
+intended originally for running under a Xen hypervisor.
 
 =head1 REQUIRED ARGUMENTS
 
