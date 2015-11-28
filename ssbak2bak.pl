@@ -447,9 +447,9 @@ sub attachment_size_check {
 
 sub cleanup {
     say 'Script terminated, cleaning up...' or croak $ERRNO;
-    system "umount $backup_to"              or carp $ERRNO;
-    system "rmdir $backup_to"               or carp $ERRNO;
-    system "rm /dev/$symlink"               or carp $ERRNO;
+    system "umount $backup_to" and carp $ERRNO;
+    system "rmdir $backup_to"  and carp $ERRNO;
+    system "rm /dev/$symlink"  and carp $ERRNO;
 
     # unlink $rsync_log or carp $ERRNO;
     # unlink $rsync_log_compressed or carp $ERRNO;
