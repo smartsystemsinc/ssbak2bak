@@ -68,31 +68,25 @@ use Smart::Comments -ENV
     ;    # dpkg libsmart-comments-perl || cpan Smart::Comments
 
 # Set variables
-my $backup_to;
-my $base_device;
+my ( $backup_to, $base_device );
 my $base_dir = $ENV{'HOME'} . '/.local/share/SS/ssbak2bak';
 my $config   = "$base_dir/config.ini";
-my $email_subject;
-my $email_output;
+my ( $email_subject, $email_output );
 my $mutt_bin;    # Defined in check_external_programs();
 my $pid;         # For rsync
-my $real_device;
-my $real_device_base;
+my ( $real_device, $real_device_base );
 my $rsync;       # Defined in check_external_programs();
 my $rsync_log            = "$base_dir/rsync.log";
 my $rsync_log_compressed = "$base_dir/rsync_log.tar.gz";
 my $rsync_options
     = " --archive --hard-links --acls --xattrs --delete --verbose --log-file=$rsync_log";
-my $rsync_output;
-my $rsync_start_time;
-my $rsync_status_return;
-my $rsync_stop_time;
+my ($rsync_output,    $rsync_start_time, $rsync_status_return,
+    $rsync_stop_time, $rsync_stop_time_short
+);
 my $source_dir;
 my $start = time;
 my $symlink;
-my @allowed_uuids;
-my @emails;
-my @symlinks;
+my ( @allowed_uuids, @emails, @symlinks );
 
 # Ensure directory exists
 if ( !-d $base_dir ) { system "mkdir -p $base_dir" and croak $ERRNO; }
@@ -385,7 +379,8 @@ sub backup {
     system "tar -cvzf $rsync_log_compressed $rsync_log"
         and push @other_errors, "\n$ERRNO";
     if ( defined $rsync_start_time ) {
-        $rsync_stop_time = strftime '%F %T', localtime;
+        $rsync_stop_time       = strftime '%F %T',        localtime;
+        $rsync_stop_time_short = strftime '%Y%m%d%H%M%S', localtime;
         ### $rsync_stop_time
     }
     my $duration = time - $start;
@@ -403,7 +398,8 @@ sub mailer {
     my $subject = shift;
     my $message = shift;
     my $filesize;
-    my $rsync_log_compressed_new = $rsync_stop_time . $rsync_log_compressed;
+    my $rsync_log_compressed_new
+        = $rsync_log_compressed . $rsync_stop_time_short;
     my @command;
 
     if ( -e $rsync_log_compressed ) {
