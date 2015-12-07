@@ -398,8 +398,12 @@ sub mailer {
     my $subject = shift;
     my $message = shift;
     my $filesize;
-    my $rsync_log_compressed_new
-        = $rsync_log_compressed . $rsync_stop_time_short;
+    my $rsync_log_compressed_new = $rsync_log_compressed;
+    my $find                     = '(rsync_log)';
+    ## no critic (RequireInterpolationOfMetachars)
+    my $replace = '$1 . q(_) . $rsync_stop_time_short';
+    $rsync_log_compressed_new =~ s/$find/$replace/xmsee;
+
     my @command;
 
     if ( -e $rsync_log_compressed ) {
