@@ -11,7 +11,7 @@ use warnings;
 
 use Carp;                          # Core
 use English qw(-no_match_vars);    # Core
-use POSIX qw(strftime);            # Built-in
+use POSIX qw(strftime);            # Core
 
 our $VERSION = 0.1;
 
